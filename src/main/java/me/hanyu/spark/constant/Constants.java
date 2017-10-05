@@ -46,4 +46,5 @@ public interface Constants {
 	String STEP_PERIOD_30_60 = "30_60";
 	String STEP_PERIOD_60 = "60";
 	String SESSION_COUNT = "session_count";
+	int SESSION_SAMPLE_SIZE=100;
 }

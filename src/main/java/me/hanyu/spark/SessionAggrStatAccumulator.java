@@ -5,7 +5,7 @@ import org.apache.spark.AccumulatorParam;
 import me.hanyu.spark.constant.Constants;
 import me.hanyu.spark.util.StringUtils;
 
-public class SessionAggStatAccumulator implements AccumulatorParam<String>{
+public class SessionAggrStatAccumulator implements AccumulatorParam<String>{
 	private static final long serialVersionUID = 1L;
 	/**	data initialization
 	 concatenate all ranges

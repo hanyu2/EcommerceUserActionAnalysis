@@ -19,6 +19,10 @@ public interface Constants {
 	String FIELD_VISIT_LENGTH="visitLength";
 	String FIELD_STEP_LENGTH="stepLength";
 	String FIELD_START_TIME="startTime";
+	String FIELD_CATEGORY_ID="categoryid";
+	String FIELD_CLICK_COUNT="clickCount";
+	String FIELD_ORDER_COUNT="orderCount";
+	String FIELD_PAY_COUNT="payCount";
 	
 	String PARAM_START_DATE="startDate";
 	String PARAM_END_DATE="endDate";

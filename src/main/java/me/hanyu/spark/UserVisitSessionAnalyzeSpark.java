@@ -15,6 +15,7 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.Function;
+import org.apache.spark.api.java.function.Function2;
 import org.apache.spark.api.java.function.PairFlatMapFunction;
 import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.api.java.function.VoidFunction;
@@ -24,18 +25,21 @@ import org.apache.spark.sql.SQLContext;
 import org.apache.spark.sql.hive.HiveContext;
 
 import com.alibaba.fastjson.JSONObject;
+import com.google.common.base.Optional;
 
 import me.hanyu.spark.conf.ConfigurationManager;
 import me.hanyu.spark.constant.Constants;
 import me.hanyu.spark.dao.ISessionAggrStatDAO;
 import me.hanyu.spark.dao.ISessionRandomExtractDAO;
 import me.hanyu.spark.dao.ITaskDAO;
-import me.hanyu.spark.dao.impl.DAOFactory;
+import me.hanyu.spark.dao.ITop10CategoryDAO;
+import me.hanyu.spark.dao.factory.DAOFactory;
 import me.hanyu.spark.dao.impl.ISessionDetailDAO;
 import me.hanyu.spark.domain.SessionAggrStat;
 import me.hanyu.spark.domain.SessionDetail;
 import me.hanyu.spark.domain.SessionRandomExtract;
 import me.hanyu.spark.domain.Task;
+import me.hanyu.spark.domain.Top10Category;
 import me.hanyu.spark.test.MockData;
 import me.hanyu.spark.util.DateUtils;
 import me.hanyu.spark.util.NumberUtils;
@@ -65,7 +69,12 @@ public class UserVisitSessionAnalyzeSpark {
 		JSONObject taskParam = JSONObject.parseObject(task.getTaskParam());
 
 		JavaRDD<Row> actionRDD = getActionRDDByDateRange(sqlContext, taskParam);
-		JavaPairRDD<String, Row> sessionid2actionRDD = getSession2ActionRDD(actionRDD);
+		/*
+		 * for(Row row : actionRDD.take(10)){
+		 * System.out.println(row.toString()); }
+		 */
+		// <sessionid, action>
+		JavaPairRDD<String, Row> sessionid2actionRDD = getSessionid2ActionRDD(actionRDD);
 
 		// <sessionid,(sessionid,searchKeywords,clickCategoryIds,age,professional,city,sex)>
 		JavaPairRDD<String, String> sessionid2AggrInfoRDD = aggregateBySession(sqlContext, actionRDD);
@@ -78,6 +87,7 @@ public class UserVisitSessionAnalyzeSpark {
 		randomExtractSession(taskid, filteredSessionid2AggrInfoRDD, sessionid2actionRDD);
 
 		calculateAndPersistAggrStat(sessionAggStatAccumulator.value(), task.getTaskid());
+		getTop10Category(taskid, filteredSessionid2AggrInfoRDD, sessionid2actionRDD);
 		sc.close();
 	}
 
@@ -107,15 +117,15 @@ public class UserVisitSessionAnalyzeSpark {
 
 		return actionDF.javaRDD();
 	}
-	
-	public static JavaPairRDD<String, Row> getSession2ActionRDD(JavaRDD<Row> actionRDD){
-		JavaPairRDD<String, Row> sessionid2ActionRDD = actionRDD.mapToPair(
-				new PairFunction<Row, String, Row>() {
-					private static final long serialVersionUID = 1L;
-					public Tuple2<String, Row> call(Row row) throws Exception {
-						return new Tuple2<String, Row>(row.getString(2), row);
-					}
-				});
+
+	public static JavaPairRDD<String, Row> getSessionid2ActionRDD(JavaRDD<Row> actionRDD) {
+		JavaPairRDD<String, Row> sessionid2ActionRDD = actionRDD.mapToPair(new PairFunction<Row, String, Row>() {
+			private static final long serialVersionUID = 1L;
+
+			public Tuple2<String, Row> call(Row row) throws Exception {
+				return new Tuple2<String, Row>(row.getString(2), row);
+			}
+		});
 		return sessionid2ActionRDD;
 	}
 
@@ -150,6 +160,7 @@ public class UserVisitSessionAnalyzeSpark {
 						Date endTime = null;
 						int stepLength = 0;
 						while (iterator.hasNext()) {
+							// rows are actions from a single sessionid
 							Row row = iterator.next();
 							if (userid == null) {
 								userid = row.getLong(1);
@@ -199,7 +210,7 @@ public class UserVisitSessionAnalyzeSpark {
 				});
 		String sql = "select * from user_info";
 		JavaRDD<Row> userInfoRDD = sqlContext.sql(sql).javaRDD();
-
+		// <userid, userinfo>
 		JavaPairRDD<Long, Row> userid2InfoRDD = userInfoRDD.mapToPair(new PairFunction<Row, Long, Row>() {
 			private static final long serialVersionUID = 1L;
 
@@ -207,7 +218,8 @@ public class UserVisitSessionAnalyzeSpark {
 				return new Tuple2<Long, Row>(row.getLong(0), row);
 			}
 		});
-
+		// <userid, <partAggrInfo(sessionid,searchKeywords,clickCategoryIds),
+		// userinfo>>
 		JavaPairRDD<Long, Tuple2<String, Row>> userid2FullInfoRDD = userid2PartAggrInfoRDD.join(userid2InfoRDD);
 
 		JavaPairRDD<String, String> sessionid2FullAggrInfoRDD = userid2FullInfoRDD
@@ -360,7 +372,8 @@ public class UserVisitSessionAnalyzeSpark {
 		return filteredSessionid2AggrInfoRDD;
 	}
 
-	private static void randomExtractSession(final long taskid, JavaPairRDD<String, String> sessionid2AggrInfoRDD, JavaPairRDD<String, Row> sessionid2actionRDD) {
+	private static void randomExtractSession(final long taskid, JavaPairRDD<String, String> sessionid2AggrInfoRDD,
+			JavaPairRDD<String, Row> sessionid2actionRDD) {
 		// <yyyy-MM--dd_HH, aggrinfo>
 		JavaPairRDD<String, String> time2sessionidRDD = sessionid2AggrInfoRDD
 				.mapToPair(new PairFunction<Tuple2<String, String>, String, String>() {
@@ -496,35 +509,35 @@ public class UserVisitSessionAnalyzeSpark {
 					}
 
 				});
-		
-		JavaPairRDD<String, Tuple2<String, Row>> extractSessionDetailRDD =
-				extractSessionidsRDD.join(sessionid2actionRDD);
-		extractSessionDetailRDD.foreach(new VoidFunction<Tuple2<String,Tuple2<String,Row>>>() {  
-			
+
+		JavaPairRDD<String, Tuple2<String, Row>> extractSessionDetailRDD = extractSessionidsRDD
+				.join(sessionid2actionRDD);
+		extractSessionDetailRDD.foreach(new VoidFunction<Tuple2<String, Tuple2<String, Row>>>() {
+
 			private static final long serialVersionUID = 1L;
 
 			public void call(Tuple2<String, Tuple2<String, Row>> tuple) throws Exception {
 				Row row = tuple._2._2;
-				
+
 				SessionDetail sessionDetail = new SessionDetail();
-				sessionDetail.setTaskid(taskid);  
-				sessionDetail.setUserid(row.getLong(1));  
-				sessionDetail.setSessionid(row.getString(2));  
-				sessionDetail.setPageid(row.getLong(3));  
+				sessionDetail.setTaskid(taskid);
+				sessionDetail.setUserid(row.getLong(1));
+				sessionDetail.setSessionid(row.getString(2));
+				sessionDetail.setPageid(row.getLong(3));
 				sessionDetail.setActionTime(row.getString(4));
-				sessionDetail.setSearchKeyword(row.getString(5));  
-				sessionDetail.setClickCategoryId(row.getLong(6));  
-				sessionDetail.setClickProductId(row.getLong(7));   
-				sessionDetail.setOrderCategoryIds(row.getString(8));  
-				sessionDetail.setOrderProductIds(row.getString(9));  
-				sessionDetail.setPayCategoryIds(row.getString(10)); 
-				sessionDetail.setPayProductIds(row.getString(11));  
-				
+				sessionDetail.setSearchKeyword(row.getString(5));
+				sessionDetail.setClickCategoryId(row.getLong(6));
+				sessionDetail.setClickProductId(row.getLong(7));
+				sessionDetail.setOrderCategoryIds(row.getString(8));
+				sessionDetail.setOrderProductIds(row.getString(9));
+				sessionDetail.setPayCategoryIds(row.getString(10));
+				sessionDetail.setPayProductIds(row.getString(11));
+
 				ISessionDetailDAO sessionDetailDAO = DAOFactory.getSessionDetailDAO();
-				sessionDetailDAO.insert(sessionDetail);  
+				sessionDetailDAO.insert(sessionDetail);
 			}
 		});
-		
+
 	}
 
 	private static void calculateAndPersistAggrStat(String value, Long taskid) {
@@ -610,4 +623,336 @@ public class UserVisitSessionAnalyzeSpark {
 		ISessionAggrStatDAO sessionAggrStatDAO = DAOFactory.getSessionAggrStatDAO();
 		sessionAggrStatDAO.insert(sessionAggrStat);
 	}
+
+	private static void getTop10Category(long taskid, JavaPairRDD<String, String> filteredSessionid2AggrInfoRDD,
+			JavaPairRDD<String, Row> sessionid2actionRDD) {
+		// get qualified session's visit details
+		JavaPairRDD<String, Row> sessionid2detailRDD = filteredSessionid2AggrInfoRDD.join(sessionid2actionRDD)
+				.mapToPair(new PairFunction<Tuple2<String, Tuple2<String, Row>>, String, Row>() {
+					private static final long serialVersionUID = 1L;
+
+					public Tuple2<String, Row> call(Tuple2<String, Tuple2<String, Row>> tuple) throws Exception {
+						return new Tuple2<String, Row>(tuple._1, tuple._2._2);
+					}
+				});
+		
+		// <categoryid, categoryid>
+		JavaPairRDD<Long, Long> categoryidRDD = sessionid2detailRDD.flatMapToPair(
+
+				new PairFlatMapFunction<Tuple2<String, Row>, Long, Long>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Iterable<Tuple2<Long, Long>> call(Tuple2<String, Row> tuple) throws Exception {
+						Row row = tuple._2;
+
+						List<Tuple2<Long, Long>> list = new ArrayList<Tuple2<Long, Long>>();
+
+						Long clickCategoryId = row.getLong(6);
+						if (clickCategoryId != null) {
+							list.add(new Tuple2<Long, Long>(clickCategoryId, clickCategoryId));
+						}
+
+						String orderCategoryIds = row.getString(8);
+						if (orderCategoryIds != null) {
+							String[] orderCategoryIdsSplited = orderCategoryIds.split(",");
+							for (String orderCategoryId : orderCategoryIdsSplited) {
+								list.add(new Tuple2<Long, Long>(Long.valueOf(orderCategoryId),
+										Long.valueOf(orderCategoryId)));
+							}
+						}
+
+						String payCategoryIds = row.getString(10);
+						if (payCategoryIds != null) {
+							String[] payCategoryIdsSplited = payCategoryIds.split(",");
+							for (String payCategoryId : payCategoryIdsSplited) {
+								list.add(new Tuple2<Long, Long>(Long.valueOf(payCategoryId),
+										Long.valueOf(payCategoryId)));
+							}
+						}
+
+						return list;
+					}
+
+				});
+		categoryidRDD = categoryidRDD.distinct();
+		// click counts of each category
+		JavaPairRDD<Long, Long> clickCategoryId2CountRDD = getClickCategoryId2CountRDD(sessionid2detailRDD);
+		// order counts of each category
+		JavaPairRDD<Long, Long> orderCategoryId2CountRDD = getOrderCategoryId2CountRDD(sessionid2detailRDD);
+		// payment count of each category
+		JavaPairRDD<Long, Long> payCategoryId2CountRDD = getPayCategoryId2CountRDD(sessionid2detailRDD);
+
+		// category with its click, order, payment counts
+		// leftOuterJoin
+		JavaPairRDD<Long, String> categoryid2countRDD = joinCategoryAndData(categoryidRDD, clickCategoryId2CountRDD,
+				orderCategoryId2CountRDD, payCategoryId2CountRDD);
+
+		// define secondary sort key
+
+		// <categorySortKey, info>
+		JavaPairRDD<CategorySortKey, String> sortKey2countRDD = categoryid2countRDD.mapToPair(
+
+				new PairFunction<Tuple2<Long, String>, CategorySortKey, String>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Tuple2<CategorySortKey, String> call(Tuple2<Long, String> tuple) throws Exception {
+						String countInfo = tuple._2;
+						long clickCount = Long.valueOf(
+								StringUtils.getFieldFromConcatString(countInfo, "\\|", Constants.FIELD_CLICK_COUNT));
+						long orderCount = Long.valueOf(
+								StringUtils.getFieldFromConcatString(countInfo, "\\|", Constants.FIELD_ORDER_COUNT));
+						long payCount = Long.valueOf(
+								StringUtils.getFieldFromConcatString(countInfo, "\\|", Constants.FIELD_PAY_COUNT));
+
+						CategorySortKey sortKey = new CategorySortKey(clickCount, orderCount, payCount);
+
+						return new Tuple2<CategorySortKey, String>(sortKey, countInfo);
+					}
+
+				});
+		//false means descending order
+		JavaPairRDD<CategorySortKey, String> sortedCategoryCountRDD = sortKey2countRDD.sortByKey(false);
+		
+		//get top ten and store in mysql
+		ITop10CategoryDAO top10CategoryDAO = DAOFactory.getTop10CategoryDAO();
+		List<Tuple2<CategorySortKey, String>> top10CategoryList = 
+				sortedCategoryCountRDD.take(10);
+		
+		for(Tuple2<CategorySortKey, String> tuple: top10CategoryList) {
+			String countInfo = tuple._2;
+			long categoryid = Long.valueOf(StringUtils.getFieldFromConcatString(
+					countInfo, "\\|", Constants.FIELD_CATEGORY_ID));  
+			long clickCount = Long.valueOf(StringUtils.getFieldFromConcatString(
+					countInfo, "\\|", Constants.FIELD_CLICK_COUNT));  
+			long orderCount = Long.valueOf(StringUtils.getFieldFromConcatString(
+					countInfo, "\\|", Constants.FIELD_ORDER_COUNT));  
+			long payCount = Long.valueOf(StringUtils.getFieldFromConcatString(
+					countInfo, "\\|", Constants.FIELD_PAY_COUNT));  
+			
+			Top10Category category = new Top10Category();
+			category.setTaskid(taskid); 
+			category.setCategoryid(categoryid); 
+			category.setClickCount(clickCount);  
+			category.setOrderCount(orderCount);
+			category.setPayCount(payCount);
+			
+			top10CategoryDAO.insert(category);  
+		}
+		
+	}
+
+	private static JavaPairRDD<Long, Long> getClickCategoryId2CountRDD(JavaPairRDD<String, Row> sessionid2detailRDD) {
+		JavaPairRDD<String, Row> clickActionRDD = sessionid2detailRDD
+				.filter(new Function<Tuple2<String, Row>, Boolean>() {
+					private static final long serialVersionUID = 1L;
+
+					public Boolean call(Tuple2<String, Row> tuple) throws Exception {
+						Row row = tuple._2;
+						return row.get(6) != null ? true : false;
+					}
+				});
+
+		JavaPairRDD<Long, Long> clickCategoryIdRDD = clickActionRDD
+				.mapToPair(new PairFunction<Tuple2<String, Row>, Long, Long>() {
+					private static final long serialVersionUID = 1L;
+
+					public Tuple2<Long, Long> call(Tuple2<String, Row> tuple) throws Exception {
+						long clickCategoryId = tuple._2.getLong(6);
+						return new Tuple2<Long, Long>(clickCategoryId, 1L);
+					}
+				});
+
+		JavaPairRDD<Long, Long> clickCategoryId2CountRDD = clickCategoryIdRDD
+				.reduceByKey(new Function2<Long, Long, Long>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Long call(Long v1, Long v2) throws Exception {
+						return v1 + v2;
+					}
+				});
+		return clickCategoryId2CountRDD;
+	}
+
+	private static JavaPairRDD<Long, Long> getOrderCategoryId2CountRDD(JavaPairRDD<String, Row> sessionid2detailRDD) {
+		JavaPairRDD<String, Row> orderActionRDD = sessionid2detailRDD.filter(
+
+				new Function<Tuple2<String, Row>, Boolean>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Boolean call(Tuple2<String, Row> tuple) throws Exception {
+						Row row = tuple._2;
+						return row.getString(8) != null ? true : false;
+					}
+
+				});
+
+		JavaPairRDD<Long, Long> orderCategoryIdRDD = orderActionRDD.flatMapToPair(
+
+				new PairFlatMapFunction<Tuple2<String, Row>, Long, Long>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Iterable<Tuple2<Long, Long>> call(Tuple2<String, Row> tuple) throws Exception {
+						Row row = tuple._2;
+						String orderCategoryIds = row.getString(8);
+						String[] orderCategoryIdsSplited = orderCategoryIds.split(",");
+
+						List<Tuple2<Long, Long>> list = new ArrayList<Tuple2<Long, Long>>();
+
+						for (String orderCategoryId : orderCategoryIdsSplited) {
+							list.add(new Tuple2<Long, Long>(Long.valueOf(orderCategoryId), 1L));
+						}
+
+						return list;
+					}
+
+				});
+
+		JavaPairRDD<Long, Long> orderCategoryId2CountRDD = orderCategoryIdRDD
+				.reduceByKey(new Function2<Long, Long, Long>() {
+					private static final long serialVersionUID = 1L;
+
+					public Long call(Long v1, Long v2) throws Exception {
+						return v1 + v2;
+					}
+
+				});
+		return orderCategoryId2CountRDD;
+	}
+
+	private static JavaPairRDD<Long, Long> getPayCategoryId2CountRDD(JavaPairRDD<String, Row> sessionid2detailRDD) {
+		JavaPairRDD<String, Row> payActionRDD = sessionid2detailRDD.filter(
+
+				new Function<Tuple2<String, Row>, Boolean>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Boolean call(Tuple2<String, Row> tuple) throws Exception {
+						Row row = tuple._2;
+						return row.getString(10) != null ? true : false;
+					}
+
+				});
+
+		JavaPairRDD<Long, Long> payCategoryIdRDD = payActionRDD.flatMapToPair(
+
+				new PairFlatMapFunction<Tuple2<String, Row>, Long, Long>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Iterable<Tuple2<Long, Long>> call(Tuple2<String, Row> tuple) throws Exception {
+						Row row = tuple._2;
+						String payCategoryIds = row.getString(10);
+						String[] payCategoryIdsSplited = payCategoryIds.split(",");
+
+						List<Tuple2<Long, Long>> list = new ArrayList<Tuple2<Long, Long>>();
+
+						for (String payCategoryId : payCategoryIdsSplited) {
+							list.add(new Tuple2<Long, Long>(Long.valueOf(payCategoryId), 1L));
+						}
+
+						return list;
+					}
+
+				});
+
+		JavaPairRDD<Long, Long> payCategoryId2CountRDD = payCategoryIdRDD
+				.reduceByKey(new Function2<Long, Long, Long>() {
+					private static final long serialVersionUID = 1L;
+
+					public Long call(Long v1, Long v2) throws Exception {
+						return v1 + v2;
+					}
+
+				});
+
+		return payCategoryId2CountRDD;
+	}
+
+	private static JavaPairRDD<Long, String> joinCategoryAndData(JavaPairRDD<Long, Long> categoryidRDD,
+			JavaPairRDD<Long, Long> clickCategoryId2CountRDD, JavaPairRDD<Long, Long> orderCategoryId2CountRDD,
+			JavaPairRDD<Long, Long> payCategoryId2CountRDD) {
+		// leftOuterJoin means right might be null
+		JavaPairRDD<Long, Tuple2<Long, Optional<Long>>> tmpJoinRDD = categoryidRDD
+				.leftOuterJoin(clickCategoryId2CountRDD);
+		JavaPairRDD<Long, String> tmpMapRDD = tmpJoinRDD.mapToPair(
+
+				new PairFunction<Tuple2<Long, Tuple2<Long, Optional<Long>>>, Long, String>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Tuple2<Long, String> call(Tuple2<Long, Tuple2<Long, Optional<Long>>> tuple)
+							throws Exception {
+						long categoryid = tuple._1;
+						Optional<Long> optional = tuple._2._2;
+						long clickCount = 0L;
+
+						if (optional.isPresent()) {
+							clickCount = optional.get();
+						}
+
+						String value = Constants.FIELD_CATEGORY_ID + "=" + categoryid + "|"
+								+ Constants.FIELD_CLICK_COUNT + "=" + clickCount;
+
+						return new Tuple2<Long, String>(categoryid, value);
+					}
+
+				});
+		tmpMapRDD = tmpMapRDD.leftOuterJoin(orderCategoryId2CountRDD).mapToPair(
+
+				new PairFunction<Tuple2<Long, Tuple2<String, Optional<Long>>>, Long, String>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Tuple2<Long, String> call(Tuple2<Long, Tuple2<String, Optional<Long>>> tuple)
+							throws Exception {
+						long categoryid = tuple._1;
+						String value = tuple._2._1;
+
+						Optional<Long> optional = tuple._2._2;
+						long orderCount = 0L;
+
+						if (optional.isPresent()) {
+							orderCount = optional.get();
+						}
+
+						value = value + "|" + Constants.FIELD_ORDER_COUNT + "=" + orderCount;
+
+						return new Tuple2<Long, String>(categoryid, value);
+					}
+
+				});
+
+		tmpMapRDD = tmpMapRDD.leftOuterJoin(payCategoryId2CountRDD).mapToPair(
+
+				new PairFunction<Tuple2<Long, Tuple2<String, Optional<Long>>>, Long, String>() {
+
+					private static final long serialVersionUID = 1L;
+
+					public Tuple2<Long, String> call(Tuple2<Long, Tuple2<String, Optional<Long>>> tuple)
+							throws Exception {
+						long categoryid = tuple._1;
+						String value = tuple._2._1;
+
+						Optional<Long> optional = tuple._2._2;
+						long payCount = 0L;
+
+						if (optional.isPresent()) {
+							payCount = optional.get();
+						}
+
+						value = value + "|" + Constants.FIELD_PAY_COUNT + "=" + payCount;
+
+						return new Tuple2<Long, String>(categoryid, value);
+					}
+
+				});
+
+		return tmpMapRDD;
+	}
+
 }

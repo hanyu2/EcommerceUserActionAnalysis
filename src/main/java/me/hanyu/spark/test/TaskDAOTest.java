@@ -1,7 +1,7 @@
 package me.hanyu.spark.test;
 
 import me.hanyu.spark.dao.ITaskDAO;
-import me.hanyu.spark.dao.impl.DAOFactory;
+import me.hanyu.spark.dao.factory.DAOFactory;
 import me.hanyu.spark.domain.Task;
 
 public class TaskDAOTest {

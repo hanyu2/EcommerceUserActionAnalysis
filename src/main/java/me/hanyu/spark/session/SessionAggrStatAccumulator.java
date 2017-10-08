@@ -1,4 +1,4 @@
-package me.hanyu.spark;
+package me.hanyu.spark.session;
 
 import org.apache.spark.AccumulatorParam;
 

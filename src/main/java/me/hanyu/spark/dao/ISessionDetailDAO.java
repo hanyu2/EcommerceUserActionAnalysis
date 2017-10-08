@@ -1,4 +1,4 @@
-package me.hanyu.spark.dao.impl;
+package me.hanyu.spark.dao;
 
 import me.hanyu.spark.domain.SessionDetail;
 

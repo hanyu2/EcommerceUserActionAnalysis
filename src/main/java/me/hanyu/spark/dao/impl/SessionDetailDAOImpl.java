@@ -1,5 +1,6 @@
 package me.hanyu.spark.dao.impl;
 
+import me.hanyu.spark.dao.ISessionDetailDAO;
 import me.hanyu.spark.domain.SessionDetail;
 import me.hanyu.spark.jdbc.JDBCHelper;
 

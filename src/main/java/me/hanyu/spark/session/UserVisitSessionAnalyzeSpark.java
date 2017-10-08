@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
 import org.apache.spark.Accumulator;
 import org.apache.spark.SparkConf;
 import org.apache.spark.SparkContext;
@@ -60,7 +62,11 @@ public class UserVisitSessionAnalyzeSpark {
 	public static void main(String[] args) {
 		args = new String[] { "2" };
 
-		SparkConf conf = new SparkConf().setAppName(Constants.SPARK_APP_NAME_SESSION).setMaster("local");
+		SparkConf conf = new SparkConf()
+				.setAppName(Constants.SPARK_APP_NAME_SESSION)
+				.setMaster("local")
+				.set("spark.serializer", "org.apache.spark.serializer.KyroSerializer")
+				.registerKryoClasses(new Class[]{CategorySortKey.class});
 		JavaSparkContext sc = new JavaSparkContext(conf);
 		SQLContext sqlContext = getSQLContext(sc.sc());
 
@@ -483,7 +489,28 @@ public class UserVisitSessionAnalyzeSpark {
 				}
 			}
 		}
-		final Broadcast<Map<String, Map<String, List<Integer>>>> dateHourExtractMapBroadcast = sc.broadcast(dateHourExtractMap);
+		Map<String, Map<String,IntList>> fastutilDateHourExtractMap = 
+				new HashMap<String, Map<String,IntList>>();
+		for(Map.Entry<String, Map<String,List<Integer>>> dateHourExtractEntry : dateHourExtractMap.entrySet()) {
+			String date = dateHourExtractEntry.getKey();
+			Map<String,List<Integer>> hourExtractMap = dateHourExtractEntry.getValue();
+			Map<String,IntList> fastutilHourExtractMap = new HashMap<String, IntList>();
+			
+			for(Map.Entry<String, List<Integer>> hourExtractEntry : hourExtractMap.entrySet()) {
+				String hour = hourExtractEntry.getKey();
+				List<Integer> extractList = hourExtractEntry.getValue();
+				IntList fastutilExtractList = new IntArrayList();
+				
+				for(int i = 0; i < extractList.size(); i++) {
+					fastutilExtractList.add(extractList.get(i));
+				}
+				fastutilHourExtractMap.put(hour, fastutilExtractList);	
+			}
+			fastutilDateHourExtractMap.put(date, fastutilHourExtractMap);
+		}
+		
+		final Broadcast<Map<String,Map<String,IntList>>> dateHourExtractMapBroadcast = 
+				sc.broadcast(fastutilDateHourExtractMap);		
 		// get< dateHour, (session, aggrinfo)>
 		JavaPairRDD<String, Iterable<String>> time2sessionsRDD = time2sessionidRDD.groupByKey();
 		JavaPairRDD<String, String> extractSessionidsRDD = time2sessionsRDD.flatMapToPair(
@@ -501,7 +528,7 @@ public class UserVisitSessionAnalyzeSpark {
 						String hour = dateHour.split("_")[1];
 						Iterator<String> iterator = tuple._2.iterator();
 						
-						Map<String, Map<String, List<Integer>>> dateHourExtractMap = dateHourExtractMapBroadcast.getValue();
+						Map<String, Map<String, IntList>> dateHourExtractMap = dateHourExtractMapBroadcast.value();
 						
 						List<Integer> extractIndexList = dateHourExtractMap.get(date).get(hour);
 						

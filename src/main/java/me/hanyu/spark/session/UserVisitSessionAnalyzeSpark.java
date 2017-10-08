@@ -19,10 +19,12 @@ import org.apache.spark.api.java.function.Function2;
 import org.apache.spark.api.java.function.PairFlatMapFunction;
 import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.api.java.function.VoidFunction;
+import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.DataFrame;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SQLContext;
 import org.apache.spark.sql.hive.HiveContext;
+import org.apache.spark.storage.StorageLevel;
 
 import com.alibaba.fastjson.JSONObject;
 import com.google.common.base.Optional;
@@ -77,19 +79,22 @@ public class UserVisitSessionAnalyzeSpark {
 		 */
 		// <sessionid, action>
 		JavaPairRDD<String, Row> sessionid2actionRDD = getSessionid2ActionRDD(actionRDD);
+		sessionid2actionRDD = sessionid2actionRDD.persist(StorageLevel.MEMORY_ONLY());
 
 		// <sessionid,(sessionid,searchKeywords,clickCategoryIds,age,professional,city,sex)>
-		JavaPairRDD<String, String> sessionid2AggrInfoRDD = aggregateBySession(sqlContext, actionRDD);
+		JavaPairRDD<String, String> sessionid2AggrInfoRDD = aggregateBySession(sqlContext, sessionid2actionRDD);
 		// init our accumulator
 		Accumulator<String> sessionAggStatAccumulator = sc.accumulator("", new SessionAggrStatAccumulator());
 
 		JavaPairRDD<String, String> filteredSessionid2AggrInfoRDD = filterSessionAndAggrStat(sessionid2AggrInfoRDD,
 				taskParam, sessionAggStatAccumulator);
+		filteredSessionid2AggrInfoRDD = filteredSessionid2AggrInfoRDD.persist(StorageLevel.MEMORY_ONLY());
 		
 		JavaPairRDD<String, Row> sessionid2detailRDD = getSessionid2detailRDD(
 				filteredSessionid2AggrInfoRDD, sessionid2actionRDD);
+		sessionid2detailRDD = sessionid2detailRDD.persist(StorageLevel.MEMORY_ONLY());
 
-		randomExtractSession(taskid, filteredSessionid2AggrInfoRDD, sessionid2actionRDD);
+		randomExtractSession(sc, taskid, filteredSessionid2AggrInfoRDD, sessionid2detailRDD);
 
 		calculateAndPersistAggrStat(sessionAggStatAccumulator.value(), task.getTaskid());
 		List<Tuple2<CategorySortKey, String>> top10CategoryList = getTop10Category(taskid, sessionid2detailRDD);
@@ -126,28 +131,21 @@ public class UserVisitSessionAnalyzeSpark {
 	}
 
 	public static JavaPairRDD<String, Row> getSessionid2ActionRDD(JavaRDD<Row> actionRDD) {
-		JavaPairRDD<String, Row> sessionid2ActionRDD = actionRDD.mapToPair(new PairFunction<Row, String, Row>() {
+		JavaPairRDD<String, Row> sessionid2actionRDD = actionRDD.mapToPair(new PairFunction<Row, String, Row>() {
 			private static final long serialVersionUID = 1L;
 
 			public Tuple2<String, Row> call(Row row) throws Exception {
 				return new Tuple2<String, Row>(row.getString(2), row);
 			}
 		});
-		return sessionid2ActionRDD;
+		return sessionid2actionRDD;
 	}
 
 	// aggregate by session id
-	private static JavaPairRDD<String, String> aggregateBySession(SQLContext sqlContext, JavaRDD<Row> actionRDD) {
-		JavaPairRDD<String, Row> sessionid2ActionRDD = actionRDD.mapToPair(new PairFunction<Row, String, Row>() {
-			private static final long serialVersionUID = 1L;
-
-			// aggregate by sessionid
-			public Tuple2<String, Row> call(Row row) throws Exception {
-				return new Tuple2<String, Row>(row.getString(2), row);
-			}
-		});
+	private static JavaPairRDD<String, String> aggregateBySession(SQLContext sqlContext, JavaPairRDD<String, Row> sessionid2actionRDD) {
+		
 		// group action data by session
-		JavaPairRDD<String, Iterable<Row>> sessionid2ActionsRDD = sessionid2ActionRDD.groupByKey();
+		JavaPairRDD<String, Iterable<Row>> sessionid2ActionsRDD = sessionid2actionRDD.groupByKey();
 		// aggregate by search word and product category
 		// <userid,partAggrInfo(sessionid,searchKeywords,clickCategoryIds)>
 		JavaPairRDD<Long, String> userid2PartAggrInfoRDD = sessionid2ActionsRDD
@@ -397,7 +395,10 @@ public class UserVisitSessionAnalyzeSpark {
 		return sessionid2detailRDD;
 	}
 	
-	private static void randomExtractSession(final long taskid, JavaPairRDD<String, String> sessionid2AggrInfoRDD,
+	private static void randomExtractSession(
+			JavaSparkContext sc,
+			final long taskid, 
+			JavaPairRDD<String, String> sessionid2AggrInfoRDD,
 			JavaPairRDD<String, Row> sessionid2actionRDD) {
 		// <yyyy-MM--dd_HH, aggrinfo>
 		JavaPairRDD<String, String> time2sessionidRDD = sessionid2AggrInfoRDD
@@ -413,7 +414,7 @@ public class UserVisitSessionAnalyzeSpark {
 					}
 
 				});
-		final Map<String, Object> countMap = time2sessionidRDD.countByKey();
+		Map<String, Object> countMap = time2sessionidRDD.countByKey();
 		// Turn<yyyy-MM-dd_hh, count> => <yyyy_mm_dd, <hh, dd>>
 		Map<String, Map<String, Long>> dateHourCountMap = new HashMap<String, Map<String, Long>>();
 
@@ -482,6 +483,7 @@ public class UserVisitSessionAnalyzeSpark {
 				}
 			}
 		}
+		final Broadcast<Map<String, Map<String, List<Integer>>>> dateHourExtractMapBroadcast = sc.broadcast(dateHourExtractMap);
 		// get< dateHour, (session, aggrinfo)>
 		JavaPairRDD<String, Iterable<String>> time2sessionsRDD = time2sessionidRDD.groupByKey();
 		JavaPairRDD<String, String> extractSessionidsRDD = time2sessionsRDD.flatMapToPair(
@@ -498,9 +500,11 @@ public class UserVisitSessionAnalyzeSpark {
 						String date = dateHour.split("_")[0];
 						String hour = dateHour.split("_")[1];
 						Iterator<String> iterator = tuple._2.iterator();
-
+						
+						Map<String, Map<String, List<Integer>>> dateHourExtractMap = dateHourExtractMapBroadcast.getValue();
+						
 						List<Integer> extractIndexList = dateHourExtractMap.get(date).get(hour);
-
+						
 						ISessionRandomExtractDAO sessionRandomExtractDAO = DAOFactory.getSessionRandomExtractDAO();
 
 						int index = 0;

@@ -39,102 +39,115 @@ public class JDBCHelper {
 
 	private JDBCHelper() {
 		int datasourceSize = ConfigurationManager.getInteger(Constants.JDBC_DATASOURCE_SIZE);
-		for(int i = 0; i < datasourceSize; i++){
-			String url = ConfigurationManager.getProperty(Constants.JDBC_URL);
-			String user = ConfigurationManager.getProperty(Constants.JDBC_USER);
-			String password = ConfigurationManager.getProperty(Constants.JDBC_PASSWORD);
+		for (int i = 0; i < datasourceSize; i++) {
+			boolean local = ConfigurationManager.getBoolean(Constants.SPARK_LOCAL);
+			String url = null;
+			String user = null;
+			String password = null;
+			if (local) {
+				url = ConfigurationManager.getProperty(Constants.JDBC_URL);
+				user = ConfigurationManager.getProperty(Constants.JDBC_USER);
+				password = ConfigurationManager.getProperty(Constants.JDBC_PASSWORD);
+			} else {
+				url = ConfigurationManager.getProperty(Constants.JDBC_URL_PROD);
+				user = ConfigurationManager.getProperty(Constants.JDBC_USER_PROD);
+				password = ConfigurationManager.getProperty(Constants.JDBC_PASSWORD_PROD);
+			}
 			try {
 				Connection conn = DriverManager.getConnection(url, user, password);
-				datasource.push(conn);  
+				datasource.push(conn);
 			} catch (Exception e) {
-				e.printStackTrace(); 
+				e.printStackTrace();
 			}
 		}
 	}
+
 	public synchronized Connection getConnection() {
-		while(datasource.size() == 0) {
+		while (datasource.size() == 0) {
 			try {
 				Thread.sleep(10);
 			} catch (InterruptedException e) {
 				e.printStackTrace();
-			}  
+			}
 		}
 		return datasource.poll();
 	}
-	//return affected lines
-	public int executeUpdate(String sql, Object[] params){
+
+	// return affected lines
+	public int executeUpdate(String sql, Object[] params) {
 		int rtn = 0;
 		Connection conn = null;
 		PreparedStatement pstmt = null;
 		try {
 			conn = getConnection();
 			pstmt = conn.prepareStatement(sql);
-			for(int i = 0; i < params.length; i++){
+			for (int i = 0; i < params.length; i++) {
 				pstmt.setObject(i + 1, params[i]);
 			}
 			rtn = pstmt.executeUpdate();
 		} catch (Exception e) {
 			// TODO: handle exception
 			e.printStackTrace();
-		}finally {
-			if(conn != null){
+		} finally {
+			if (conn != null) {
 				datasource.push(conn);
 			}
 		}
 		return rtn;
 	}
-	public void executeQuery(String sql, Object[] params, 
-			QueryCallback callback) {
+
+	public void executeQuery(String sql, Object[] params, QueryCallback callback) {
 		Connection conn = null;
 		PreparedStatement pstmt = null;
 		ResultSet rs = null;
-		
+
 		try {
 			conn = getConnection();
 			pstmt = conn.prepareStatement(sql);
-			
-			for(int i = 0; i < params.length; i++) {
-				pstmt.setObject(i + 1, params[i]);   
+
+			for (int i = 0; i < params.length; i++) {
+				pstmt.setObject(i + 1, params[i]);
 			}
 			rs = pstmt.executeQuery();
-			callback.process(rs);  
+			callback.process(rs);
 		} catch (Exception e) {
 			e.printStackTrace();
 		} finally {
-			if(conn != null) {
-				datasource.push(conn);  
+			if (conn != null) {
+				datasource.push(conn);
 			}
 		}
 	}
-	
+
 	public int[] executeBatch(String sql, List<Object[]> paramsList) {
 		int[] rtn = null;
 		Connection conn = null;
 		PreparedStatement pstmt = null;
-		
+
 		try {
 			conn = getConnection();
-			
-			conn.setAutoCommit(false);  
+
+			conn.setAutoCommit(false);
 			pstmt = conn.prepareStatement(sql);
-			
-			for(Object[] params : paramsList) {
-				for(int i = 0; i < params.length; i++) {
-					pstmt.setObject(i + 1, params[i]);  
+
+			for (Object[] params : paramsList) {
+				for (int i = 0; i < params.length; i++) {
+					pstmt.setObject(i + 1, params[i]);
 				}
 				pstmt.addBatch();
 			}
-			
+
 			rtn = pstmt.executeBatch();
-			
+
 			conn.commit();
 		} catch (Exception e) {
-			e.printStackTrace();  
+			e.printStackTrace();
 		}
-		
+
 		return rtn;
 	}
-	public static interface QueryCallback{
+
+	public static interface QueryCallback {
 		void process(ResultSet rs) throws Exception;
 	}
 }

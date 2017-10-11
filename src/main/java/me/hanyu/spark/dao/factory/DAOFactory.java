@@ -1,11 +1,13 @@
 package me.hanyu.spark.dao.factory;
 
+import me.hanyu.spark.dao.IPageSplitConvertRateDAO;
 import me.hanyu.spark.dao.ISessionAggrStatDAO;
 import me.hanyu.spark.dao.ISessionDetailDAO;
 import me.hanyu.spark.dao.ISessionRandomExtractDAO;
 import me.hanyu.spark.dao.ITaskDAO;
 import me.hanyu.spark.dao.ITop10CategoryDAO;
 import me.hanyu.spark.dao.ITop10SessionDAO;
+import me.hanyu.spark.dao.impl.PageSplitConvertRateDAOImpl;
 import me.hanyu.spark.dao.impl.SessionAggrStatDAOImpl;
 import me.hanyu.spark.dao.impl.SessionDetailDAOImpl;
 import me.hanyu.spark.dao.impl.SessionRandomExtractDAOImpl;
@@ -31,5 +33,8 @@ public class DAOFactory {
 	}
 	public static ITop10SessionDAO getTop10SessionDAO(){
 		return new Top10SessionImpl();
+	}
+	public static IPageSplitConvertRateDAO getPageSplitConvertRateDAO() {
+		return new PageSplitConvertRateDAOImpl();
 	}
 }

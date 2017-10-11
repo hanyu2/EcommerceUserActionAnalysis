@@ -6,9 +6,17 @@ public interface Constants {
 	String JDBC_URL = "jdbc.url";
 	String JDBC_USER = "jdbc.user";
 	String JDBC_PASSWORD = "jdbc.password";
+	String JDBC_URL_PROD = "jdbc.url.prod";
+	String JDBC_USER_PROD = "jdbc.user.prod";
+	String JDBC_PASSWORD_PROD = "jdbc.password.prod";
 	String SPARK_LOCAL = "spark.local";
+	String SPARK_LOCAL_TASKID_SESSION = "spark.local.taskid.session";
+	String SPARK_LOCAL_TASKID_PAGE = "spark.local.taskid.page";
+	String SPARK_LOCAL_TASKID_PRODUCT = "spark.local.taskid.product";
+	
 
-	String SPARK_APP_NAME_SESSION = "UserVisitSessionAnalysisSpark";
+	String SPARK_APP_NAME_SESSION = "UserVisitSessionAnalyzeSpark";
+	String SPARK_APP_NAME_PAGE = "PageOneStepConvertRateSpark";
 	String FIELD_SESSION_ID = "sessionid";
 	String FIELD_SEARCH_KEYWORDS = "searchKeyWords";
 	String FIELD_CLICK_CATEGORY_IDS = "clickCategoryIds";
@@ -33,6 +41,7 @@ public interface Constants {
 	String PARAM_SEX="sex";
 	String PARAM_KEYWORDS="keywords";
 	String PARAM_CATEGORY_IDS="categoryIds";
+	String PARAM_TARGET_PAGE_FLOW = "targetPageFlow";
 	
 	String TIME_PERIOD_1s_3s = "1s_3s";
 	String TIME_PERIOD_4s_6s = "4s_6s";
@@ -52,4 +61,5 @@ public interface Constants {
 	String SESSION_COUNT = "session_count";
 	int TOP_SESSION_COUNT = 3;
 	int SESSION_SAMPLE_SIZE=100;
+	
 }

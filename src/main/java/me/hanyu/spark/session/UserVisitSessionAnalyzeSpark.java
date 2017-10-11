@@ -20,7 +20,6 @@ import org.apache.spark.api.java.function.PairFlatMapFunction;
 import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.api.java.function.VoidFunction;
 import org.apache.spark.broadcast.Broadcast;
-import org.apache.spark.sql.DataFrame;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SQLContext;
 import org.apache.spark.sql.hive.HiveContext;
@@ -46,10 +45,10 @@ import me.hanyu.spark.domain.SessionRandomExtract;
 import me.hanyu.spark.domain.Task;
 import me.hanyu.spark.domain.Top10Category;
 import me.hanyu.spark.domain.Top10Session;
-import me.hanyu.spark.test.MockData;
 import me.hanyu.spark.util.DateUtils;
 import me.hanyu.spark.util.NumberUtils;
 import me.hanyu.spark.util.ParamUtils;
+import me.hanyu.spark.util.SparkUtils;
 import me.hanyu.spark.util.StringUtils;
 import me.hanyu.spark.util.ValidUtils;
 import scala.Tuple2;
@@ -64,7 +63,6 @@ public class UserVisitSessionAnalyzeSpark {
 
 		SparkConf conf = new SparkConf()
 				.setAppName(Constants.SPARK_APP_NAME_SESSION)
-				.setMaster("local")
 				/*.set("spark.default.parallelism","100")*/
 				.set("spark.storage.memoryFrachtion", "0.5")
 				.set("spark.serializer", "org.apache.spark.serializer.KyroSerializer")
@@ -73,19 +71,23 @@ public class UserVisitSessionAnalyzeSpark {
 				.set("spark.shuffle.memoryFraction", "0.3")
 				.set("spark.reducer.maxSizeInFlight","24")
 				.registerKryoClasses(new Class[]{CategorySortKey.class});
+		SparkUtils.setMaster(conf);
 		JavaSparkContext sc = new JavaSparkContext(conf);
 		/*sc.checkpointFile("");*/
 		SQLContext sqlContext = getSQLContext(sc.sc());
 
-		mockData(sc, sqlContext);
+		SparkUtils.mockData(sc, sqlContext);
 
 		ITaskDAO taskDAO = DAOFactory.getTaskDAO();
 
-		long taskid = ParamUtils.getTaskIdFromArgs(args);
+		long taskid = ParamUtils.getTaskIdFromArgs(args, Constants.SPARK_LOCAL_TASKID_SESSION);
 		Task task = taskDAO.findById(taskid) ;
+		if(task == null){
+			System.out.println(new Date() + ":cannot find fask with id [" + taskid + "].");
+		}
 		JSONObject taskParam = JSONObject.parseObject(task.getTaskParam());
 
-		JavaRDD<Row> actionRDD = getActionRDDByDateRange(sqlContext, taskParam);
+		JavaRDD<Row> actionRDD = SparkUtils.getActionRDDByDateRange(sqlContext, taskParam);
 		/*
 		 * for(Row row : actionRDD.take(10)){
 		 * System.out.println(row.toString()); }
@@ -124,25 +126,6 @@ public class UserVisitSessionAnalyzeSpark {
 		} else {
 			return new HiveContext(sc);
 		}
-	}
-
-	private static void mockData(JavaSparkContext sc, SQLContext sqlContext) {
-		boolean local = ConfigurationManager.getBoolean(Constants.SPARK_LOCAL);
-		if (local) {
-			MockData.mock(sc, sqlContext);
-		}
-	}
-
-	private static JavaRDD<Row> getActionRDDByDateRange(SQLContext sqlContext, JSONObject taskParam) {
-		String startDate = ParamUtils.getParam(taskParam, Constants.PARAM_START_DATE);
-		String endDate = ParamUtils.getParam(taskParam, Constants.PARAM_END_DATE);
-		String sql = "select * " + "from user_visit_action " + "where date>='" + startDate + "' " + "and date<='"
-				+ endDate + "'";
-
-		DataFrame actionDF = sqlContext.sql(sql);
-
-		//return actionDF.javaRDD().repartition(100);
-		return actionDF.javaRDD();
 	}
 
 	public static JavaPairRDD<String, Row> getSessionid2ActionRDD(JavaRDD<Row> actionRDD) {

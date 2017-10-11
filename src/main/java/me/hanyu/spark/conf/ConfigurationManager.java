@@ -37,4 +37,14 @@ public class ConfigurationManager {
 		}
 		return false;
 	}
+	public static Long getLong(String key) {
+		String value = getProperty(key);
+		try {
+			return Long.valueOf(value);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return 0L;
+	}
+	
 }

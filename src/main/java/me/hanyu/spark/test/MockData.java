@@ -69,7 +69,7 @@ public class MockData {
 							clickCategoryId, clickProductId,
 							orderCategoryIds, orderProductIds,
 							payCategoryIds, payProductIds,
-							random.nextInt(10));
+							Long.valueOf(String.valueOf(random.nextInt(10))));
 					rows.add(row);
 				}
 			}

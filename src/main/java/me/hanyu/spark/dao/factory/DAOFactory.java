@@ -1,6 +1,9 @@
 package me.hanyu.spark.dao.factory;
 
 import me.hanyu.spark.dao.IAdBlacklistDAO;
+import me.hanyu.spark.dao.IAdClickTrendDAO;
+import me.hanyu.spark.dao.IAdProvinceTop3DAO;
+import me.hanyu.spark.dao.IAdStatDAO;
 import me.hanyu.spark.dao.IAdUserClickCountDAO;
 import me.hanyu.spark.dao.IAreaTop3ProductDAO;
 import me.hanyu.spark.dao.IPageSplitConvertRateDAO;
@@ -11,6 +14,9 @@ import me.hanyu.spark.dao.ITaskDAO;
 import me.hanyu.spark.dao.ITop10CategoryDAO;
 import me.hanyu.spark.dao.ITop10SessionDAO;
 import me.hanyu.spark.dao.impl.AdBlacklistDAOImpl;
+import me.hanyu.spark.dao.impl.AdClickTrendDAOImpl;
+import me.hanyu.spark.dao.impl.AdProvinceTop3DAOImpl;
+import me.hanyu.spark.dao.impl.AdStatDAOImpl;
 import me.hanyu.spark.dao.impl.AdUserClickCountDAOImpl;
 import me.hanyu.spark.dao.impl.AreaTop3ProductDAOImpl;
 import me.hanyu.spark.dao.impl.PageSplitConvertRateDAOImpl;
@@ -51,5 +57,14 @@ public class DAOFactory {
 	}
 	public static IAdBlacklistDAO getAdBlacklistDAO() {
 		return new AdBlacklistDAOImpl();
+	}
+	public static IAdStatDAO getAdStatDAO(){
+		return new AdStatDAOImpl();
+	}
+	public static IAdProvinceTop3DAO getAdProvinceTop3DAO(){
+		return new AdProvinceTop3DAOImpl();
+	}
+	public static IAdClickTrendDAO getAdClickTrendDAO() {
+		return new AdClickTrendDAOImpl();
 	}
 }

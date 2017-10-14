@@ -1,5 +1,7 @@
 package me.hanyu.spark.dao.factory;
 
+import me.hanyu.spark.dao.IAdBlacklistDAO;
+import me.hanyu.spark.dao.IAdUserClickCountDAO;
 import me.hanyu.spark.dao.IAreaTop3ProductDAO;
 import me.hanyu.spark.dao.IPageSplitConvertRateDAO;
 import me.hanyu.spark.dao.ISessionAggrStatDAO;
@@ -8,6 +10,8 @@ import me.hanyu.spark.dao.ISessionRandomExtractDAO;
 import me.hanyu.spark.dao.ITaskDAO;
 import me.hanyu.spark.dao.ITop10CategoryDAO;
 import me.hanyu.spark.dao.ITop10SessionDAO;
+import me.hanyu.spark.dao.impl.AdBlacklistDAOImpl;
+import me.hanyu.spark.dao.impl.AdUserClickCountDAOImpl;
 import me.hanyu.spark.dao.impl.AreaTop3ProductDAOImpl;
 import me.hanyu.spark.dao.impl.PageSplitConvertRateDAOImpl;
 import me.hanyu.spark.dao.impl.SessionAggrStatDAOImpl;
@@ -41,5 +45,11 @@ public class DAOFactory {
 	}
 	public static IAreaTop3ProductDAO getAreaTop3ProductDAO() {
 		return new AreaTop3ProductDAOImpl();
+	}
+	public static IAdUserClickCountDAO getAdUserClickCountDAO() {
+		return new AdUserClickCountDAOImpl();
+	}
+	public static IAdBlacklistDAO getAdBlacklistDAO() {
+		return new AdBlacklistDAOImpl();
 	}
 }

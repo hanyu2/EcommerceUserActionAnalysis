@@ -142,6 +142,10 @@ public class JDBCHelper {
 			conn.commit();
 		} catch (Exception e) {
 			e.printStackTrace();
+		}finally {
+			if(conn != null) {
+				datasource.push(conn);  
+			}
 		}
 
 		return rtn;
